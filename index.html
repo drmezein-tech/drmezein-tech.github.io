@@ -12,6 +12,11 @@
   <link rel="apple-touch-icon" href="icons/icon-180.png">
   <link rel="icon" href="icons/icon-192.png">
   <link rel="stylesheet" href="styles.css">
+  <script>
+    // Apply the saved theme before first paint (per-phone preference).
+    try { document.documentElement.dataset.theme = localStorage.getItem('ward_theme') || 'light'; }
+    catch { document.documentElement.dataset.theme = 'light'; }
+  </script>
   <title>The Ward</title>
 </head>
 <body>
@@ -23,7 +28,12 @@
   <script src="db.js"></script>
   <script src="app.js"></script>
   <script>
-    if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+    if ('serviceWorker' in navigator) {
+      // Reload once when an updated version takes over, so changes show without reopening twice.
+      const hadController = !!navigator.serviceWorker.controller;
+      navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController) location.reload(); });
+      navigator.serviceWorker.register('sw.js');
+    }
   </script>
 </body>
 </html>

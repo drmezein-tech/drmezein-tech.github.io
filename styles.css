@@ -4,8 +4,14 @@
   --blue: #1d4ed8; --amber: #b45309; --amber-soft: #fff4e0; --radius: 12px;
   color-scheme: light;
 }
+/* Theme: data-theme on <html> is light (default), dark, or auto (follow the phone). */
+:root[data-theme="dark"] {
+  --bg: #0e1418; --surface: #182128; --text: #e7edf1; --muted: #93a1ad; --faint: #5d6a75;
+  --line: #2a353e; --accent: #2bb3a5; --accent-soft: #143a37; --red: #f26b6b; --red-soft: #3a1d1f;
+  --blue: #7aa2ff; --amber: #f0b34a; --amber-soft: #3a2e17; color-scheme: dark;
+}
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root[data-theme="auto"] {
     --bg: #0e1418; --surface: #182128; --text: #e7edf1; --muted: #93a1ad; --faint: #5d6a75;
     --line: #2a353e; --accent: #2bb3a5; --accent-soft: #143a37; --red: #f26b6b; --red-soft: #3a1d1f;
     --blue: #7aa2ff; --amber: #f0b34a; --amber-soft: #3a2e17; color-scheme: dark;

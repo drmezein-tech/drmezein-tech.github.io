@@ -38,9 +38,12 @@ const getSetting = (k, def) => { const r = DB.one('SELECT value FROM settings WH
 const setSetting = (k, v) => DB.run('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', [k, String(v)]);
 
 // ---------- fields & reference ranges (SI) ----------
-const VITALS = [
+// BP is stored as two columns but entered as one "120/80" field.
+const BP = [
   { k: 'bp_sys', l: 'SBP', u: 'mmHg', r: [90, 140] },
   { k: 'bp_dia', l: 'DBP', u: 'mmHg', r: [60, 90] },
+];
+const VITALS = [
   { k: 'hr', l: 'HR', u: 'bpm', r: [60, 100] },
   { k: 'temp', l: 'Temp', u: '°C', r: [36, 37.9] },
   { k: 'weight', l: 'Weight', u: 'kg' },
@@ -60,7 +63,7 @@ const LABS = [
   { k: 'creat', l: 'Creat', u: 'µmol/L', r: [60, 110] },
   { k: 'tac', l: 'Tac', u: 'ng/mL' },
 ];
-const FIELD = Object.fromEntries([...VITALS, ...FLUIDS, ...LABS].map(f => [f.k, f]));
+const FIELD = Object.fromEntries([...BP, ...VITALS, ...FLUIDS, ...LABS].map(f => [f.k, f]));
 const TEXT_FIELDS = ['clinical_notes', 'free_notes'];
 
 function range(f) {
@@ -355,6 +358,44 @@ function cell(f, day, pid, date) {
     <span class="prev">${prev ? `${fmtNum(prev.v)} · ${agoText(prev.date, date)}` : (r ? `${r[0]}–${r[1]}` : '&nbsp;')}</span>
   </label>`;
 }
+const bpText = (s, d) => `${fmtNum(s)}/${fmtNum(d)}`;
+const bpFlag = (s, d) => flag(FIELD.bp_sys, s) || flag(FIELD.bp_dia, d);
+// Accepts 120/80, 120.80, 120,80 or "120 80" (the phone number pad has no slash).
+function parseBP(str) {
+  const s = str.trim();
+  if (!s) return { s: null, d: null };
+  const m = s.match(/^(\d{2,3})\s*[\/.,\s-]\s*(\d{2,3})$/);
+  return m ? { s: Number(m[1]), d: Number(m[2]) } : null;
+}
+function bpCell(day, pid, date) {
+  const s = day.bp_sys, d = day.bp_dia, fl = bpFlag(s, d);
+  const prev = DB.one(`SELECT date, bp_sys, bp_dia FROM days WHERE patient_id=? AND date<?
+    AND (bp_sys IS NOT NULL OR bp_dia IS NOT NULL) ORDER BY date DESC LIMIT 1`, [pid, date]);
+  return `<label class="cell ${fl > 0 ? 'hi' : fl < 0 ? 'lo' : ''}">
+    <span class="cl">BP <em>mmHg</em></span>
+    <span class="cv"><input inputmode="decimal" data-bp data-prev="${prev && prev.bp_sys != null ? prev.bp_sys : ''}" placeholder="120/80"
+      value="${s == null && d == null ? '' : bpText(s, d)}"><i class="arrow">${arrow(s, prev && prev.bp_sys)}</i></span>
+    <span class="prev">${prev ? `${bpText(prev.bp_sys, prev.bp_dia)} · ${agoText(prev.date, date)}` : '90–140/60–90'}</span>
+  </label>`;
+}
+function bindBP(pid, date) {
+  const inp = $('[data-bp]'), c = inp.closest('.cell');
+  const prev = inp.dataset.prev === '' ? null : Number(inp.dataset.prev);
+  inp.addEventListener('input', () => {
+    const bp = parseBP(inp.value);
+    if (!bp) return;
+    c.classList.remove('hi', 'lo', 'invalid');
+    const fl = bpFlag(bp.s, bp.d);
+    if (fl) c.classList.add(fl > 0 ? 'hi' : 'lo');
+    $('.arrow', c).textContent = arrow(bp.s, prev);
+    queueSave('bp', () => { saveDayField(pid, date, 'bp_sys', bp.s); saveDayField(pid, date, 'bp_dia', bp.d); });
+  });
+  inp.addEventListener('blur', () => {
+    const bp = parseBP(inp.value);
+    c.classList.toggle('invalid', !bp);
+    if (bp && bp.s != null) inp.value = bpText(bp.s, bp.d);
+  });
+}
 function balanceHtml(day) {
   const has = ['oral_in', 'iv_in', 'uop'].some(k => day[k] != null && day[k] !== '');
   if (!has) return '<span class="muted">—</span>';
@@ -404,7 +445,7 @@ function renderDay(pid, date) {
       <div class="kv"><span>IS</span>${esc(p.induction || '—')} <span class="muted">→</span> ${m.length ? esc(m.join(', ')) : '—'}</div>
     </section>
 
-    <section><h2>Vital signs</h2><div class="grid">${VITALS.map(f => cell(f, day, pid, date)).join('')}</div></section>
+    <section><h2>Vital signs</h2><div class="grid">${bpCell(day, pid, date)}${VITALS.map(f => cell(f, day, pid, date)).join('')}</div></section>
     <section><h2>Fluids</h2><div class="grid g3">${FLUIDS.map(f => cell(f, day, pid, date)).join('')}</div>
       <div class="balance" id="bal">${balanceHtml(day)}</div></section>
     <section><h2>Labs</h2><div class="grid">${LABS.map(f => cell(f, day, pid, date)).join('')}</div></section>
@@ -454,6 +495,8 @@ function renderDay(pid, date) {
     if (FLUIDS.includes(f)) $('#bal').innerHTML = balanceHtml(cur);
     queueSave(k, () => saveDayField(pid, date, k, n));
   }));
+
+  bindBP(pid, date);
 
   // swipe between days
   const dates = [];
@@ -632,7 +675,12 @@ function renderSettings() {
   const counts = DB.one(`SELECT (SELECT COUNT(*) FROM patients WHERE discharge_date IS NULL OR discharge_date>?) AS ward,
     (SELECT COUNT(*) FROM patients) AS total, (SELECT COUNT(*) FROM days) AS days`, [todayISO()]);
   const last = getSetting('last_backup', '');
+  const theme = document.documentElement.dataset.theme || 'light';
   app.innerHTML = header('Settings', back('#/')) + `<main>
+    <section><h2>Appearance</h2><div class="pills">
+      ${[['light', 'Light'], ['dark', 'Dark'], ['auto', 'Follow phone']].map(([v, l]) =>
+        `<label class="pill"><input type="radio" name="theme" value="${v}" ${theme === v ? 'checked' : ''}><span>${l}</span></label>`).join('')}
+    </div></section>
     <section><h2>Tacrolimus target</h2><div class="row2">
       <label>Low (ng/mL)<input inputmode="decimal" id="tl" value="${esc(getSetting('tac_low', 8))}"></label>
       <label>High (ng/mL)<input inputmode="decimal" id="th" value="${esc(getSetting('tac_high', 10))}"></label></div></section>
@@ -649,6 +697,10 @@ function renderSettings() {
     if (isFinite(lo) && isFinite(hi) && lo < hi) { setSetting('tac_low', lo); setSetting('tac_high', hi); toast('Tac target saved'); }
     else toast('Enter a valid range (low < high)');
   };
+  $$('[name=theme]').forEach(r => r.onchange = () => {
+    document.documentElement.dataset.theme = r.value;
+    try { localStorage.setItem('ward_theme', r.value); } catch {}
+  });
   $('#tl').onchange = saveTac;
   $('#th').onchange = saveTac;
   $('#bk').onclick = () => saveBackup().then(ok => ok && renderSettings());
