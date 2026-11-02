@@ -55,7 +55,7 @@ const FLUIDS = [
 ];
 const LABS = [
   { k: 'wbc', l: 'WBC', u: '×10⁹/L', r: [4, 11] },
-  { k: 'hb', l: 'Hb', u: 'g/L', r: [120, 170] },
+  { k: 'hb', l: 'Hb', u: 'g/dL', r: [12, 17] },
   { k: 'plt', l: 'Plt', u: '×10⁹/L', r: [150, 400] },
   { k: 'k', l: 'K', u: 'mmol/L', r: [3.5, 5.0] },
   { k: 'pct', l: 'PCT', u: 'ng/mL', r: [0, 0.5] },
